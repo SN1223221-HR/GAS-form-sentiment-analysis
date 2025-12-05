@@ -95,3 +95,17 @@ const CONFIG = {
 ## 📜 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🔮 Future Architecture (Python Migration)
+
+現在はプロトタイプとして保守性を重視し **GAS (Google Apps Script)** で運用していますが、応募数が月間10,000件を超えた場合のスケーラビリティを考慮し、**Google Cloud Functions (Python)** への移行を設計済みです。
+
+`cloud_functions/` ディレクトリに、移行用のバックエンドコードを同梱しています。
+
+### Comparison
+| Feature | Current (GAS) | Future (Cloud Functions) |
+| :--- | :--- | :--- |
+| **Language** | JavaScript (V8) | Python 3.10+ |
+| **Trigger** | Form Submit Trigger | Webhook / PubSub |
+| **Timeout** | 6 mins | 60 mins (max) |
+| **Use Case** | Prototyping / SMB | Enterprise / High Load |
