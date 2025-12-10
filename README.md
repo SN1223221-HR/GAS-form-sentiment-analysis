@@ -1,97 +1,126 @@
-# Google Form Sentiment Analysis with GAS
+# Serverless Sentiment Analysis Pipeline (Python/GCP)
 
-Googleフォームの回答（自由記述テキスト）を**Google Natural Language API**を用いて自動で感情分析し、ポジティブ/ネガティブな傾向をスコアリングしてスプレッドシートに蓄積するGoogle Apps Scriptです。
+![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)
+![GCP](https://img.shields.io/badge/GCP-Cloud%20Functions-4285F4?logo=google-cloud&logoColor=white)
+![Pydantic](https://img.shields.io/badge/Pydantic-v2-E92063?logo=pydantic&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-書類選考の一次スクリーニング補助や、顧客アンケートの感情分析などを自動化するために設計されています。
+Googleフォームの回答テキストを **Google Cloud Natural Language API** を用いて感情分析し、スコアリングを行うサーバーレスパイプラインです。
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Google Apps Script](https://img.shields.io/badge/Google%20Apps%20Script-4285F4?logo=google-apps-script&logoColor=white)
+従来のモノリシックなGoogle Apps Script (GAS) 運用から脱却し、**Python (Cloud Functions) によるマイクロサービスアーキテクチャ** へ移行したプロジェクトです。「責務の分離」と「型安全性」を重視した設計を採用しています。
 
 ## 🏗 Architecture
+
+GASは「データの収集と転送」のみに責務を限定し、ビジネスロジックは全てPython環境（Cloud Functions）に集約しています。
 
 ```mermaid
 graph LR
     User([User]) -->|Submit| Form[Google Form]
-    Form -->|Trigger| GAS[Google Apps Script]
-    GAS -->|Analyze Text| NLP[Google Cloud<br>Natural Language API]
-    NLP -->|Score & Sentiment| GAS
-    GAS -->|Save Result| Sheet[Google Sheets]
+    Form -->|Trigger| GAS[GAS Adapter]
+    GAS -- OIDC Auth --> CF["Cloud Functions<br>(Python 3.10+)"]
+    
+    subgraph "Serverless Core (Python)"
+        CF -->|Validate| Pydantic[Pydantic V2]
+        Pydantic -->|Analyze| NLP[Cloud Natural Language API]
+        Pydantic -->|Score| Logic[Scoring Service]
+    end
+    
+    Logic -->|Persist| Sheet[Google Sheets]
 ```
 
-## ✨ Features
+## ✨ Key Features
 
-* **自動感情分析:** フォーム送信と同時にAPIを叩き、テキストの感情スコア（-1.0 〜 1.0）を取得。
-* **キーワード補正:** 特定のキーワード（「貢献」「不安」など）が含まれる場合、スコアに加点/減点を行うロジックを実装。
-* **セキュアな設計:** APIキーをコードにハードコーディングせず、Script Propertiesで管理。
-* **柔軟な設定:** 分析対象の列や評価キーワードを `CONFIG` オブジェクトで一元管理。
+* **モダンなPython設計:** `Type Hinting` と `Pydantic V2` を全面的に採用。実行時エラーを排除し、厳密なバリデーションを実現。
+* **高水準なセキュリティ:**
+    * **OIDC認証:** `Cloud Functions Invoker` 権限を持つGASからのみ実行可能（一般公開はブロック）。
+    * **機密情報の分離:** APIキーやスプレッドシートIDは環境変数で管理し、コードベースから排除。
+* **スケーラビリティ:** サーバーレス (Cloud Functions Gen2) により、リクエスト数に応じて0から自動スケール。
+* **拡張性:** `Service` 層と `Adapter` 層を分離しているため、将来的なDB移行（例: Firestore, BigQuery）もコード修正を最小限に抑えて実現可能。
 
-## ⚙️ Prerequisites
+## 📂 Directory Structure
 
-1.  **Google Cloud Platform (GCP) プロジェクト**
-    * [Cloud Natural Language API](https://cloud.google.com/natural-language) の有効化。
-    * APIキーの取得。
-2.  **Google Forms & Google Sheets**
-    * フォームと、回答が紐付いたスプレッドシート。
-
-## 🚀 Setup
-
-### 1. スクリプトの導入
-1. 対象のスプレッドシートを開き、メニューから **拡張機能 > Apps Script** を選択。
-2. `Code.gs` に、本リポジトリのコードを貼り付けます。
-
-### 2. APIキーの設定 (重要)
-セキュリティのため、APIキーはコードに直接書かず、スクリプトプロパティに保存します。
-
-1. GASエディタの左側メニュー「プロジェクトの設定 (歯車アイコン)」をクリック。
-2. 下部の「スクリプト プロパティ」で **スクリプト プロパティを追加** をクリック。
-3. 以下の通り設定して保存します。
-    * **プロパティ:** `GCP_API_KEY`
-    * **値:** `取得したGCPのAPIキー`
-
-### 3. コンフィグ設定
-コード内の `CONFIG` オブジェクトを、実際のフォームに合わせて修正します。
-
-```javascript
-const CONFIG = {
-  FORM: {
-    // 解析したい列番号 (A列=0, B列=1...)
-    TARGET_COLUMN_INDICES: [6, 7, 8], 
-    // ...
-  },
-  // ...
-};
+```text
+.
+├── src/
+│   ├── main.py           # エントリーポイント (Controller)
+│   ├── config.py         # 環境変数・設定管理
+│   ├── schemas.py        # データモデル・バリデーション (Pydantic)
+│   ├── services.py       # ビジネスロジック (感情分析・スコアリング)
+│   └── adapters.py       # インフラ層 (Google Sheets I/O)
+├── requirements.txt      # 依存ライブラリ
+└── README.md
 ```
 
-### 4. トリガーの設定
-初回のみ、以下の関数を手動で実行してトリガーをセットアップしてください。
+## 🚀 Setup & Deployment
 
-1. エディタ上の関数プルダウンから `setTrigger` を選択。
-2. **実行** をクリック（初回は権限承認のポップアップが出ます）。
+### 1. 前提条件
+* Google Cloud Platform プロジェクトの作成
+* 必要なAPIの有効化: `Cloud Functions`, `Cloud Build`, `Cloud Natural Language API`, `Google Sheets API`
+* `gcloud` CLI のインストール済み
 
-これで、フォームが送信されるたびに自動で分析が走ります。
+### 2. 環境変数の設定
+デプロイ用の環境変数ファイル `.env.yaml` を作成します（※Git管理外にすること）。
 
-## 🛠 Configuration
+```yaml
+GCP_PROJECT_ID: "your-project-id"
+SHEET_ID: "your-google-sheet-id"
+SHEET_NAME: "Result_Output"
+```
 
-| 設定項目 | 説明 |
-| --- | --- |
-| `TARGET_COLUMN_INDICES` | 分析対象とする回答の列インデックス（配列指定）。 |
-| `SHEET_NAME` | 結果を出力するシート名。事前に作成が必要です。 |
-| `KEYWORDS` | `POSITIVE` / `NEGATIVE` それぞれに含まれる単語を指定することで、スコア補正を行います。 |
+### 3. Cloud Functions へのデプロイ
+セキュリティを高めるため、`--no-allow-unauthenticated`（未認証アクセスの拒否）を設定してデプロイします。
 
-## 📦 Output Example
+```bash
+gcloud functions deploy analyze_submission \
+    --gen2 \
+    --runtime=python310 \
+    --region=asia-northeast1 \
+    --source=. \
+    --entry-point=analyze_submission \
+    --trigger-http \
+    --no-allow-unauthenticated \
+    --env-vars-file=.env.yaml \
+    --service-account=your-service-account@your-project.iam.gserviceaccount.com
+```
 
-指定したシートに以下のような形式で出力されます。
+### 4. クライアント側 (Google Apps Script) の設定
+Googleフォーム側のGAS (`Code.gs`) に、OIDCトークンを含めてリクエストを送信する処理を実装します。
+※ GASプロジェクトの設定ファイル `appsscript.json` にて、GCPプロジェクト番号との紐付けが必要です。
 
-| Timestamp | Name | Full Text | Sentiment | Score |
-| --- | --- | --- | --- | --- |
-| 2023/10/01 10:00 | 山田 太郎 | 貴社のビジョンに共感し... | 0.8 | 10.0 |
-| 2023/10/01 10:05 | 鈴木 花子 | 特にありません... | -0.1 | -1.0 |
+## 🔌 API Specification
 
-## ⚠️ Note
+**Endpoint:** `POST /analyze_submission`
 
-* **API Cost:** Google Cloud Natural Language API の無料枠を超える利用には料金が発生する場合があります。
-* **Privacy:** 個人情報を含むテキストをAPIに送信する際は、各組織のポリシーに従ってください。
+### Request (JSON)
+```json
+{
+  "timestamp": "2023-12-01T10:00:00",
+  "name": "山田 太郎",
+  "answers": [
+    "貴社のビジョンに強く共感しており、即戦力として貢献したいと考えています。",
+    "リーダーシップを発揮した経験があります。"
+  ]
+}
+```
+
+### Response (JSON)
+```json
+{
+  "status": "success",
+  "score": 12.5
+}
+```
+
+## 🛠 Tech Stack
+
+* **Runtime:** Python 3.10+
+* **Framework:** Google Cloud Functions Framework
+* **Validation:** Pydantic V2
+* **Cloud Services:**
+    * Google Cloud Natural Language API (Sentiment Analysis)
+    * Google Sheets API (via `gspread`)
+* **Client:** Google Apps Script (UrlFetchApp)
 
 ## 📜 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License.
