@@ -1,0 +1,5 @@
+functions-framework==3.*
+google-cloud-language==2.*
+gspread==6.*
+pydantic==2.*
+google-auth==2.*
